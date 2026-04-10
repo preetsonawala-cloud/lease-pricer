@@ -128,236 +128,220 @@ async function downloadPDF({ schedule, result, clientName, startDate, term, pLab
   await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js");
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-  const W = 210, M = 14;
+  const W = 210, M = 12;
+  const INNER = W - M * 2;         // 186mm usable width
 
-  // ── Palette
-  const NAVY   = [12, 28, 64];
-  const NAVY2  = [30, 55, 110];
-  const SLATE  = [80, 100, 130];
-  const LGRAY  = [235, 238, 244];
-  const WHITE  = [255, 255, 255];
-  const MUTED  = [150, 165, 185];
-  const GREEN  = [16, 140, 72];
-  const GOLD   = [160, 120, 20];
+  // Palette
+  const NAVY  = [11, 26, 68];
+  const BLUE2 = [30, 58, 138];
+  const SLATE = [71, 85, 105];
+  const LGRAY = [232, 236, 243];
+  const WHITE = [255, 255, 255];
+  const MUTED = [148, 163, 184];
+  const GOLD  = [153, 115, 18];
+  const GREEN = [21, 128, 61];
 
-  const dateStr = new Date().toLocaleDateString("en-IN", { day:"2-digit", month:"long", year:"numeric" });
+  const dateStr  = new Date().toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" });
   const startStr = startDate ? new Date(startDate).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" }) : "—";
   const termLabel = TERMS.find(t => t.value === term)?.label || term;
   const totalPayable = schedule.reduce((s, r) => s + r.amount, 0);
 
-  // ─────────────────────────────────────
-  // PAGE HEADER  (compact — 28mm tall)
-  // ─────────────────────────────────────
-  doc.setFillColor(...NAVY);
-  doc.rect(0, 0, W, 28, "F");
-  // gold accent stripe
-  doc.setFillColor(...GOLD);
-  doc.rect(0, 25, W, 2.5, "F");
+  // ── helper: draw page header (used page 1 and continuation pages)
+  const drawHeader = (pageNum) => {
+    // Navy bar
+    doc.setFillColor(...NAVY);
+    doc.rect(0, 0, W, 22, "F");
+    // Gold underline
+    doc.setFillColor(...GOLD);
+    doc.rect(0, 20, W, 2, "F");
 
-  // Brand left
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(15);
-  doc.setTextColor(...WHITE);
-  doc.text("LeasePricer", M, 12);
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(7.5);
-  doc.setTextColor(...MUTED);
-  doc.text("Equipment Rental — Payment Schedule", M, 19);
-
-  // Date right
-  doc.setFontSize(7.5);
-  doc.setTextColor(...MUTED);
-  doc.text(dateStr, W - M, 19, { align: "right" });
-
-  // Client name right (large)
-  if (clientName) {
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
+    doc.setFontSize(13);
     doc.setTextColor(...WHITE);
-    doc.text(clientName, W - M, 12, { align: "right" });
+    doc.text("LeasePricer", M, 10);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(...MUTED);
+    doc.text("Equipment Rental  |  Payment Schedule", M, 16.5);
+    doc.text(dateStr, W - M, 16.5, { align: "right" });
+
+    if (clientName) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(...WHITE);
+      doc.text(clientName, W - M, 10, { align: "right" });
+    }
+  };
+
+  drawHeader(1);
+
+  // ── Deal summary block (page 1 only)
+  let y = 28;
+
+  // 3-column summary grid
+  const cols = [
+    [
+      ["Prepared for",   clientName || "—"],
+      ["Asset Cost",     fmt(result.cost)],
+    ],
+    [
+      ["Lease Duration", `${result.totalPeriods} ${result.ppy === 12 ? "months" : "quarters"}`],
+      ["Payment Terms",  termLabel],
+    ],
+    [
+      ["Rent Start",     startStr],
+      result.deposit > 0
+        ? ["Security Deposit", `${fmt(result.deposit)} (refundable)`]
+        : ["Regular Rental",   fmtD(result.rental)],
+    ],
+  ];
+  if (result.firstRental > 0) {
+    cols[0].push([`First ${pLabel.charAt(0).toUpperCase()+pLabel.slice(1)} Rental`, fmtD(result.firstRental)]);
+    cols[1].push(["Regular Rental", fmtD(result.rental)]);
+    cols[2].push(["Total Periods",  String(result.totalPeriods)]);
   }
-
-  // ─────────────────────────────────────
-  // DEAL SUMMARY  (2-column key-value, compact)
-  // ─────────────────────────────────────
-  let y = 34;
-
-  // Build summary items in 2 columns × N rows
-  const summaryLeft = [
-    ["Client",         clientName || "—"],
-    ["Asset Cost",     fmt(result.cost)],
-    ["Lease Duration", `${result.totalPeriods} ${result.ppy === 12 ? "months" : "quarters"}`],
-    ["Payment Terms",  termLabel],
-  ];
-  const summaryRight = [
-    ["Rent Start Date", startStr],
-    ["Regular Rental",  fmtD(result.rental)],
-    result.firstRental > 0
-      ? [`First ${pLabel.charAt(0).toUpperCase()+pLabel.slice(1)} Rental`, fmtD(result.firstRental)]
-      : ["Total Periods", String(result.totalPeriods)],
-    result.deposit > 0
-      ? ["Security Deposit", `${fmt(result.deposit)} (refundable)`]
-      : ["Total Payable", fmt(totalPayable)],
-  ];
-
-  const rows = Math.max(summaryLeft.length, summaryRight.length);
-  const boxH = rows * 8 + 8;
-  const colW = (W - M * 2) / 2 - 4;
+  const maxRows = Math.max(...cols.map(c => c.length));
+  const boxH = maxRows * 7.5 + 7;
+  const colW3 = INNER / 3;
 
   doc.setFillColor(...LGRAY);
-  doc.roundedRect(M, y, W - M * 2, boxH, 2, 2, "F");
+  doc.rect(M, y, INNER, boxH, "F");
 
-  for (let i = 0; i < rows; i++) {
-    const cy = y + 7 + i * 8;
-
-    if (summaryLeft[i]) {
+  cols.forEach((colItems, ci) => {
+    colItems.forEach(([lbl, val], ri) => {
+      const cx = M + ci * colW3 + 4;
+      const cy = y + 6 + ri * 7.5;
       doc.setFont("helvetica", "normal");
-      doc.setFontSize(7);
+      doc.setFontSize(6.5);
       doc.setTextColor(...SLATE);
-      doc.text(summaryLeft[i][0], M + 5, cy);
+      doc.text(lbl, cx, cy);
       doc.setFont("helvetica", "bold");
       doc.setFontSize(7.5);
       doc.setTextColor(...NAVY);
-      doc.text(summaryLeft[i][1], M + 5 + 36, cy);
-    }
+      // truncate long values to fit column
+      const maxW = colW3 - 8;
+      doc.text(val, cx, cy + 4, { maxWidth: maxW });
+    });
+  });
 
-    if (summaryRight[i]) {
-      const rx = M + colW + 12;
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(7);
-      doc.setTextColor(...SLATE);
-      doc.text(summaryRight[i][0], rx, cy);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(7.5);
-      doc.setTextColor(...NAVY);
-      doc.text(summaryRight[i][1], rx + 36, cy);
-    }
-  }
+  y += boxH + 5;
 
-  y += boxH + 7;
-
-  // ─────────────────────────────────────
-  // SECTION TITLE
-  // ─────────────────────────────────────
+  // Section heading
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   doc.setTextColor(...NAVY);
-  doc.text("Payment Schedule", M, y);
-  // thin rule
-  doc.setDrawColor(...LGRAY);
-  doc.setLineWidth(0.4);
-  doc.line(M + 38, y - 1, W - M, y - 1);
-  y += 4;
+  doc.text("PAYMENT SCHEDULE", M, y);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7);
+  doc.setTextColor(...SLATE);
+  doc.text(`${schedule.length} payment${schedule.length > 1 ? "s" : ""}`, M + 40, y);
+  y += 3;
 
-  // ─────────────────────────────────────
-  // SCHEDULE TABLE  — tight rows, no Period column (redundant with #)
-  // ─────────────────────────────────────
-  const tableBody = schedule.map((row, idx) => {
+  // ── Table
+  // Columns: No. | Description | Due Date | Amount
+  // No "# row index" column — just the period number. Keeps numbers from wrapping.
+  const tableBody = schedule.map((row) => {
     const isDeposit = row.period === "—";
     return [
-      { content: String(idx + 1), styles: { halign: "center", textColor: SLATE } },
-      { content: isDeposit ? "—" : String(row.period), styles: { halign: "center" } },
-      { content: row.type, styles: isDeposit ? { textColor: GREEN, fontStyle: "bold" } : {} },
+      {
+        content: isDeposit ? "DEP" : String(row.period),
+        styles: {
+          halign: "center",
+          fontStyle: isDeposit ? "bold" : "normal",
+          textColor: isDeposit ? GREEN : SLATE,
+        },
+      },
+      {
+        content: isDeposit ? "Security Deposit (refundable)" : row.type,
+        styles: isDeposit ? { textColor: GREEN, fontStyle: "bold" } : {},
+      },
       { content: row.dueDate },
-      { content: fmtD(row.amount), styles: { halign: "right", fontStyle: "bold" } },
+      {
+        content: fmtD(row.amount),
+        styles: { halign: "right", fontStyle: "bold" },
+      },
     ];
   });
 
   doc.autoTable({
     startY: y,
     head: [[
-      { content: "#",          styles: { halign: "center" } },
-      { content: "No.",        styles: { halign: "center" } },
+      { content: "No.",         styles: { halign: "center" } },
       { content: "Description" },
       { content: "Due Date" },
       { content: "Amount (INR)", styles: { halign: "right" } },
     ]],
     body: tableBody,
     foot: [[
-      { content: "", colSpan: 3 },
-      { content: "TOTAL PAYABLE", styles: { halign: "right", fontStyle: "bold", fontSize: 8, textColor: NAVY } },
-      { content: fmtD(totalPayable), styles: { halign: "right", fontStyle: "bold", fontSize: 9, textColor: NAVY } },
+      { content: "", colSpan: 2 },
+      { content: "TOTAL PAYABLE", styles: { halign: "right", fontStyle: "bold", textColor: NAVY } },
+      { content: fmtD(totalPayable), styles: { halign: "right", fontStyle: "bold", textColor: NAVY, fontSize: 9 } },
     ]],
     margin: { left: M, right: M },
-    tableLineColor: LGRAY,
-    tableLineWidth: 0,
     styles: {
       font: "helvetica",
       fontSize: 8,
-      cellPadding: { top: 2.8, bottom: 2.8, left: 4, right: 4 },
-      textColor: [30, 45, 70],
+      // Key fix: minimal vertical padding so rows are short
+      cellPadding: { top: 2, bottom: 2, left: 3, right: 3 },
+      textColor: [30, 45, 75],
       lineColor: LGRAY,
       lineWidth: 0.2,
-      overflow: "linebreak",
+      // Critical: prevent ANY text wrapping
+      overflow: "ellipsize",
+      minCellHeight: 0,
     },
     headStyles: {
       fillColor: NAVY,
       textColor: WHITE,
       fontStyle: "bold",
       fontSize: 7.5,
-      cellPadding: { top: 3.5, bottom: 3.5, left: 4, right: 4 },
+      cellPadding: { top: 3, bottom: 3, left: 3, right: 3 },
     },
     footStyles: {
-      fillColor: [240, 243, 250],
+      fillColor: [238, 242, 252],
       textColor: NAVY,
       fontStyle: "bold",
-      fontSize: 8,
-      cellPadding: { top: 4, bottom: 4, left: 4, right: 4 },
+      fontSize: 8.5,
+      cellPadding: { top: 3.5, bottom: 3.5, left: 3, right: 3 },
     },
-    alternateRowStyles: { fillColor: [249, 250, 252] },
+    alternateRowStyles: { fillColor: [248, 249, 252] },
+    // Fixed widths that WON'T cause wrapping
     columnStyles: {
-      0: { cellWidth: 9,  halign: "center" },
-      1: { cellWidth: 12, halign: "center" },
-      2: { cellWidth: "auto" },
-      3: { cellWidth: 30 },
-      4: { cellWidth: 36, halign: "right" },
+      0: { cellWidth: 14, halign: "center" },   // "No." — enough for "DEP" or "36"
+      1: { cellWidth: "auto" },                  // Description — takes remaining space
+      2: { cellWidth: 28 },                      // Due Date — "10 Apr 2026" = ~22mm
+      3: { cellWidth: 38, halign: "right" },     // Amount
     },
     showFoot: "lastPage",
     didDrawPage: (data) => {
-      // Repeat compact header on continuation pages
       if (data.pageNumber > 1) {
-        doc.setFillColor(...NAVY);
-        doc.rect(0, 0, W, 14, "F");
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(10);
-        doc.setTextColor(...WHITE);
-        doc.text("LeasePricer", M, 9);
-        if (clientName) {
-          doc.setFontSize(8);
-          doc.text(clientName, W - M, 9, { align: "right" });
-        }
-        doc.setFillColor(...GOLD);
-        doc.rect(0, 12, W, 1.5, "F");
+        drawHeader(data.pageNumber);
+        // Reset top margin for continuation pages
+        data.settings.margin.top = 26;
       }
     },
   });
 
-  // ─────────────────────────────────────
-  // FOOTER NOTE  (on last page)
-  // ─────────────────────────────────────
-  const lastY = doc.lastAutoTable.finalY + 6;
-  const pageH = 297;
-  const noteH = 14;
-
-  // Only draw footer if it fits on the page, otherwise it auto goes to next
-  if (lastY + noteH < pageH - 8) {
+  // ── Footer note on last page
+  const lastY = doc.lastAutoTable.finalY + 5;
+  if (lastY < 285) {
     doc.setDrawColor(...LGRAY);
-    doc.setLineWidth(0.3);
+    doc.setLineWidth(0.25);
     doc.line(M, lastY, W - M, lastY);
-
     doc.setFont("helvetica", "normal");
     doc.setFontSize(6.5);
-    doc.setTextColor(...SLATE);
-    doc.text(
-      "All amounts are exclusive of applicable taxes unless stated. Security deposit is fully refundable at lease end. Equipment remains the property of the lessor throughout the lease term.",
-      M, lastY + 5,
-      { maxWidth: W - M * 2 }
-    );
     doc.setTextColor(...MUTED);
-    doc.text("Confidential — For recipient use only", W / 2, lastY + 12, { align: "center" });
+    doc.text(
+      "All amounts exclude applicable taxes. Security deposit is refundable at lease end. Equipment remains property of the lessor throughout the lease term. For payment reference only.",
+      M, lastY + 4.5,
+      { maxWidth: INNER }
+    );
+    doc.setFontSize(6);
+    doc.text("Confidential — For recipient use only", W / 2, lastY + 10, { align: "center" });
   }
 
-  const safe = clientName ? clientName.replace(/\s+/g, "_") : "Client";
+  const safe = clientName ? clientName.replace(/[^a-zA-Z0-9]/g, "_") : "Client";
   doc.save(`LeasePricer_${safe}.pdf`);
 }
 
