@@ -71,38 +71,27 @@ function generateSchedule({ rental, duration, paymentTerm, deposit, firstRental,
   const fmtDate = d => d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 
   const rows = [];
-
-  // Deposit row
   if (dep > 0) {
     rows.push({ period: "—", type: "Security Deposit", dueDate: fmtDate(startDate), amount: dep, note: "Refundable at lease end" });
   }
-
   for (let i = 0; i < totalPeriods; i++) {
-    const periodNum = i + 1;
     const amt = (i === 0 && fr !== null) ? fr : rental;
     const isFirst = i === 0 && fr !== null;
     const monthsOffset = isQtr ? i * 3 : i;
-
     let dueDate;
     if (isAdv) {
       dueDate = addMonths(startDate, monthsOffset);
     } else {
       dueDate = addMonths(startDate, monthsOffset + (isQtr ? 3 : 1));
     }
-
-    const periodLabel = isQtr
-      ? `Q${periodNum} (${fmtDate(addMonths(startDate, monthsOffset))} – ${fmtDate(addMonths(addMonths(startDate, monthsOffset), 3))})`
-      : `Month ${periodNum}`;
-
     rows.push({
-      period: periodNum,
+      period: i + 1,
       type: isFirst ? "First Period Rental (Stepped)" : "Rental",
       dueDate: fmtDate(dueDate),
       amount: amt,
       note: isAdv ? "Due in advance" : "Due in arrears",
     });
   }
-
   return rows;
 }
 
@@ -115,257 +104,344 @@ const fmtPct = n => n.toFixed(4) + "%";
 const todayStr = () => new Date().toISOString().split("T")[0];
 
 const TERMS = [
-  { value: "monthly_advance",   label: "Monthly Advance"   },
-  { value: "monthly_arrears",   label: "Monthly Arrears"   },
-  { value: "quarterly_advance", label: "Quarterly Advance" },
-  { value: "quarterly_arrears", label: "Quarterly Arrears" },
+  { value: "monthly_advance",   label: "Monthly — Advance"   },
+  { value: "monthly_arrears",   label: "Monthly — Arrears"   },
+  { value: "quarterly_advance", label: "Quarterly — Advance" },
+  { value: "quarterly_arrears", label: "Quarterly — Arrears" },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SUB-COMPONENTS
-// ─────────────────────────────────────────────────────────────────────────────
-const Pill = ({ active, onClick, children, colors }) => (
-  <button onClick={onClick} style={{
-    flex: 1, padding: "8px 6px", border: "none", cursor: "pointer",
-    fontFamily: "inherit", fontSize: 12, fontWeight: 600, letterSpacing: ".4px",
-    borderRadius: 8, margin: 3, transition: "all .2s",
-    background: active ? colors.activeBg : "transparent",
-    color: active ? colors.activeText : colors.inactiveText,
-    boxShadow: active ? colors.shadow : "none",
-  }}>{children}</button>
-);
-
-const StyledInput = ({ dark, accentColor, ...props }) => (
-  <input {...props} style={{
-    width: "100%", padding: "12px 16px", borderRadius: 10,
-    border: `1.5px solid ${dark ? "rgba(255,255,255,.08)" : "rgba(0,0,0,.1)"}`,
-    outline: "none", fontSize: 15, fontFamily: "inherit", fontWeight: 500,
-    transition: "border-color .2s, box-shadow .2s", boxSizing: "border-box",
-    background: dark ? "rgba(255,255,255,.04)" : "rgba(0,0,0,.03)",
-    color: dark ? "#f2f2f2" : "#111",
-    ...props.style,
-  }}
-  onFocus={e => { e.target.style.borderColor = accentColor; e.target.style.boxShadow = `0 0 0 3px ${accentColor}22`; }}
-  onBlur={e => { e.target.style.borderColor = dark ? "rgba(255,255,255,.08)" : "rgba(0,0,0,.1)"; e.target.style.boxShadow = "none"; }}
-  />
-);
-
-const StyledSelect = ({ dark, children, ...props }) => (
-  <select {...props} style={{
-    width: "100%", padding: "12px 16px", borderRadius: 10,
-    border: `1.5px solid ${dark ? "rgba(255,255,255,.08)" : "rgba(0,0,0,.1)"}`,
-    outline: "none", fontSize: 15, fontFamily: "inherit", fontWeight: 500,
-    background: dark ? "rgba(255,255,255,.04)" : "rgba(0,0,0,.03)",
-    color: dark ? "#f2f2f2" : "#111", cursor: "pointer",
-    boxSizing: "border-box", appearance: "none",
-    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23888' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E")`,
-    backgroundRepeat: "no-repeat", backgroundPosition: "right 14px center",
-  }}>{children}</select>
-);
-
-const ResultLine = ({ label, value, bold, accent, dark, separator }) => (
-  <div style={{
-    display: "flex", justifyContent: "space-between", alignItems: "center",
-    padding: separator ? "14px 0" : "9px 0",
-    borderTop: separator ? `1px solid ${dark ? "rgba(255,255,255,.08)" : "rgba(0,0,0,.08)"}` : "none",
-  }}>
-    <span style={{ fontSize: 12, color: accent ? "#e8b000" : (dark ? "#777" : "#aaa"), letterSpacing: ".3px", fontWeight: bold ? 600 : 400 }}>{label}</span>
-    <span style={{ fontSize: bold ? 15 : 13, color: accent ? "#e8b000" : (dark ? "#e8e8e8" : "#111"), fontWeight: bold ? 700 : 500 }}>{value}</span>
-  </div>
-);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PDF GENERATOR  (pure browser, uses jsPDF from CDN)
+// PDF GENERATOR
 // ─────────────────────────────────────────────────────────────────────────────
 function loadScript(src) {
   return new Promise((resolve, reject) => {
     if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
     const s = document.createElement("script");
-    s.src = src;
-    s.onload = resolve;
+    s.src = src; s.onload = resolve;
     s.onerror = () => reject(new Error(`Failed to load: ${src}`));
     document.head.appendChild(s);
   });
 }
 
 async function downloadPDF({ schedule, result, clientName, startDate, term, pLabel }) {
-  // Load jsPDF core first, then autotable plugin sequentially
   await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js");
   await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js");
-
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-  const W = 210, margin = 18;
+  const W = 210, M = 16;
 
-  // ── Colours
-  const gold   = [200, 150, 0];
-  const dark1  = [20, 20, 20];
-  const dark2  = [50, 50, 50];
-  const light  = [245, 244, 240];
-  const white  = [255, 255, 255];
-  const green  = [34, 170, 100];
+  const navy  = [15,  35,  75];
+  const slate = [71,  85, 105];
+  const gold  = [180,140,  40];
+  const light = [248,249,250];
+  const white = [255,255,255];
+  const green = [22, 160,  90];
 
-  // ── Header band
-  doc.setFillColor(...dark1);
-  doc.rect(0, 0, W, 38, "F");
+  // Header
+  doc.setFillColor(...navy);
+  doc.rect(0, 0, W, 44, "F");
   doc.setFillColor(...gold);
-  doc.rect(0, 35, W, 3, "F");
+  doc.rect(0, 40, W, 4, "F");
 
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(22);
+  doc.setFontSize(20);
   doc.setTextColor(...white);
-  doc.text("LeasePricer", margin, 16);
-
+  doc.text("LeasePricer", M, 18);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
-  doc.setTextColor(180, 180, 180);
-  doc.text("Payment Schedule", margin, 24);
-  doc.text(`Generated: ${new Date().toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" })}`, margin, 30);
+  doc.setTextColor(180, 195, 220);
+  doc.text("Equipment Rental Payment Schedule", M, 27);
+  doc.text(`Date: ${new Date().toLocaleDateString("en-IN", { day:"2-digit", month:"long", year:"numeric" })}`, M, 34);
 
-  // Client name right side
   if (clientName) {
     doc.setFont("helvetica", "bold");
     doc.setFontSize(10);
     doc.setTextColor(...white);
-    doc.text(`Prepared for: ${clientName}`, W - margin, 16, { align: "right" });
-  }
-
-  let y = 50;
-
-  // ── Summary box
-  doc.setFillColor(...light);
-  doc.roundedRect(margin, y, W - margin * 2, 38, 4, 4, "F");
-
-  const summaryItems = [
-    ["Asset Cost",     fmt(result.cost)],
-    ["Lease Duration", `${result.totalPeriods} ${result.ppy === 12 ? "months" : "quarters"}`],
-    ["Payment Terms",  TERMS.find(t => t.value === term)?.label || term],
-    ["Rental / Period",fmtD(result.rental)],
-    result.firstRental > 0
-      ? [`First ${pLabel} Rental`, fmtD(result.firstRental)]
-      : null,
-    result.deposit > 0
-      ? ["Security Deposit", `${fmt(result.deposit)} (refundable)`]
-      : null,
-    ["Start Date",     startDate ? new Date(startDate).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" }) : "—"],
-  ].filter(Boolean);
-
-  const colW = (W - margin * 2) / 2;
-  let sx = margin + 8, sy = y + 10;
-  summaryItems.forEach(([label, value], i) => {
-    const cx = i % 2 === 0 ? margin + 8 : margin + 8 + colW;
-    const cy = sy + Math.floor(i / 2) * 10;
+    doc.text(clientName, W - M, 22, { align: "right" });
     doc.setFont("helvetica", "normal");
     doc.setFontSize(8);
-    doc.setTextColor(...dark2);
-    doc.text(label + ":", cx, cy);
+    doc.setTextColor(180, 195, 220);
+    doc.text("Prepared for", W - M, 16, { align: "right" });
+  }
+
+  let y = 54;
+
+  // Summary grid
+  doc.setFillColor(...light);
+  doc.roundedRect(M, y, W - M * 2, 42, 3, 3, "F");
+  doc.setDrawColor(220, 225, 235);
+  doc.setLineWidth(0.3);
+  doc.roundedRect(M, y, W - M * 2, 42, 3, 3, "S");
+
+  const summaryItems = [
+    ["Asset Cost",      fmt(result.cost)],
+    ["Lease Term",      `${result.totalPeriods} ${result.ppy === 12 ? "months" : "quarters"}`],
+    ["Payment Terms",   TERMS.find(t => t.value === term)?.label || term],
+    ["Rental / Period", fmtD(result.rental)],
+    result.firstRental > 0 ? [`First ${pLabel} Rental`, fmtD(result.firstRental)] : null,
+    result.deposit > 0 ? ["Security Deposit", `${fmt(result.deposit)} (refundable)`] : null,
+    ["Rent Start",      startDate ? new Date(startDate).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" }) : "—"],
+  ].filter(Boolean);
+
+  const half = Math.ceil(summaryItems.length / 2);
+  summaryItems.forEach(([label, value], i) => {
+    const col = i < half ? 0 : 1;
+    const row = i < half ? i : i - half;
+    const cx = M + 8 + col * ((W - M * 2) / 2);
+    const cy = y + 10 + row * 10;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(...slate);
+    doc.text(label, cx, cy);
     doc.setFont("helvetica", "bold");
-    doc.setTextColor(...dark1);
-    doc.text(value, cx + 38, cy);
+    doc.setFontSize(8);
+    doc.setTextColor(...navy);
+    doc.text(value, cx + 32, cy);
   });
 
-  y += 48;
+  y += 52;
 
-  // ── Section title
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(11);
-  doc.setTextColor(...dark1);
-  doc.text("Payment Schedule", margin, y);
-  y += 8;
+  doc.setFontSize(10);
+  doc.setTextColor(...navy);
+  doc.text("Payment Schedule", M, y);
+  y += 6;
 
-  // ── Table
   const tableRows = schedule.map((row, idx) => [
     idx + 1,
-    row.period === "—" ? "Deposit" : `${row.period}`,
+    row.period === "—" ? "Deposit" : String(row.period),
     row.type,
     row.dueDate,
     fmtD(row.amount),
-    row.note,
   ]);
 
   const totalPayable = schedule.reduce((s, r) => s + r.amount, 0);
 
   doc.autoTable({
     startY: y,
-    head: [["#", "Period", "Description", "Due Date", "Amount (₹)", "Note"]],
+    head: [["#", "Period", "Description", "Due Date", "Amount (₹)"]],
     body: tableRows,
-    foot: [["", "", "", "TOTAL PAYABLE", fmtD(totalPayable), ""]],
-    margin: { left: margin, right: margin },
-    styles: { font: "helvetica", fontSize: 8.5, cellPadding: 4, textColor: dark1, lineColor: [220, 218, 212], lineWidth: 0.3 },
-    headStyles: { fillColor: dark1, textColor: white, fontStyle: "bold", fontSize: 8.5 },
-    footStyles: { fillColor: [...gold, 40], textColor: dark1, fontStyle: "bold", fontSize: 9 },
-    alternateRowStyles: { fillColor: [250, 249, 246] },
-    columnStyles: {
-      0: { halign: "center", cellWidth: 8 },
-      1: { cellWidth: 16 },
-      2: { cellWidth: 48 },
-      3: { cellWidth: 30 },
-      4: { halign: "right", cellWidth: 32, fontStyle: "bold" },
-      5: { cellWidth: 38, textColor: [120, 120, 120], fontSize: 7.5 },
+    foot: [["", "", "", "Total Payable", fmtD(totalPayable)]],
+    margin: { left: M, right: M },
+    styles: {
+      font: "helvetica", fontSize: 8.5, cellPadding: { top: 5, bottom: 5, left: 5, right: 5 },
+      textColor: [30, 41, 59], lineColor: [226, 232, 240], lineWidth: 0.25,
     },
-    didDrawCell: (data) => {
-      if (data.section === "body" && data.column.index === 4) {
-        // highlight deposit row green
-        const row = schedule[data.row.index];
-        if (row && row.period === "—") {
-          doc.setTextColor(...green);
-        }
-      }
+    headStyles: { fillColor: navy, textColor: white, fontStyle: "bold", fontSize: 8 },
+    footStyles: { fillColor: [235, 238, 245], textColor: navy, fontStyle: "bold", fontSize: 9 },
+    alternateRowStyles: { fillColor: [250, 251, 253] },
+    columnStyles: {
+      0: { halign: "center", cellWidth: 9 },
+      1: { cellWidth: 14 },
+      2: { cellWidth: 60 },
+      3: { cellWidth: 32 },
+      4: { halign: "right", cellWidth: 38, fontStyle: "bold" },
     },
   });
 
-  const finalY = doc.lastAutoTable.finalY + 10;
-
-  // ── Note at bottom
-  doc.setFillColor(...light);
-  doc.roundedRect(margin, finalY, W - margin * 2, 16, 3, 3, "F");
+  const finalY = doc.lastAutoTable.finalY + 8;
+  doc.setFillColor(248, 249, 250);
+  doc.roundedRect(M, finalY, W - M * 2, 18, 2, 2, "F");
   doc.setFont("helvetica", "italic");
-  doc.setFontSize(7.5);
-  doc.setTextColor(120, 120, 120);
-  doc.text("Note: All amounts are exclusive of GST unless stated. Security deposit is fully refundable at lease end. This schedule is for payment reference only.", margin + 6, finalY + 6);
-  doc.text("Equipment remains the property of the lessor throughout the lease term.", margin + 6, finalY + 12);
+  doc.setFontSize(7);
+  doc.setTextColor(100, 116, 139);
+  doc.text("All amounts exclusive of applicable taxes. Security deposit is fully refundable at lease end. Equipment remains the", M + 5, finalY + 7);
+  doc.text("property of the lessor throughout the lease term. This document is for payment reference only.", M + 5, finalY + 13);
 
-  // ── Footer
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7);
   doc.setTextColor(180, 180, 180);
-  doc.text("Confidential — For recipient use only", W / 2, 292, { align: "center" });
+  doc.text("Confidential — For recipient use only", W / 2, 291, { align: "center" });
 
-  const safeClient = clientName ? clientName.replace(/\s+/g, "_") : "Client";
-  doc.save(`LeasePricer_Schedule_${safeClient}.pdf`);
+  const safe = clientName ? clientName.replace(/\s+/g, "_") : "Client";
+  doc.save(`LeasePricer_${safe}.pdf`);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DESIGN TOKENS
+// ─────────────────────────────────────────────────────────────────────────────
+const LIGHT = {
+  bg:        "#F8F9FB",
+  surface:   "#FFFFFF",
+  surface2:  "#F1F3F7",
+  border:    "#E2E6EF",
+  borderFocus:"#3B5BDB",
+  text:      "#0F1729",
+  textSec:   "#64748B",
+  textMute:  "#94A3B8",
+  accent:    "#1E40AF",
+  accentBg:  "#EEF2FF",
+  accentText:"#1E40AF",
+  green:     "#166534",
+  greenBg:   "#F0FDF4",
+  greenBorder:"#BBF7D0",
+  amber:     "#92400E",
+  amberBg:   "#FFFBEB",
+  amberBorder:"#FDE68A",
+  blue:      "#1E3A8A",
+  blueBg:    "#EFF6FF",
+  blueBorder:"#BFDBFE",
+  resultBg:  "#0F1729",
+  resultText:"#F8FAFC",
+};
+const DARK = {
+  bg:        "#0A0E1A",
+  surface:   "#111827",
+  surface2:  "#1C2333",
+  border:    "#1E293B",
+  borderFocus:"#6366F1",
+  text:      "#F1F5F9",
+  textSec:   "#94A3B8",
+  textMute:  "#475569",
+  accent:    "#818CF8",
+  accentBg:  "#1E1B4B",
+  accentText:"#A5B4FC",
+  green:     "#4ADE80",
+  greenBg:   "#052E16",
+  greenBorder:"#166534",
+  amber:     "#FCD34D",
+  amberBg:   "#1C1400",
+  amberBorder:"#92400E",
+  blue:      "#93C5FD",
+  blueBg:    "#0C1A3A",
+  blueBorder:"#1E3A8A",
+  resultBg:  "#1C2333",
+  resultText:"#F1F5F9",
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REUSABLE COMPONENTS  (all defined outside main)
+// ─────────────────────────────────────────────────────────────────────────────
+const SectionLabel = ({ children, T }) => (
+  <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "1.5px", textTransform: "uppercase", color: T.textMute, marginBottom: 14 }}>{children}</div>
+);
+
+const FieldLabel = ({ children, T, right }) => (
+  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+    <label style={{ fontSize: 12, fontWeight: 600, color: T.textSec }}>{children}</label>
+    {right && <span style={{ fontSize: 11, color: T.textMute }}>{right}</span>}
+  </div>
+);
+
+const Input = ({ T, dark, ...props }) => {
+  const [focused, setFocused] = useState(false);
+  return (
+    <input {...props}
+      onFocus={e => { setFocused(true); props.onFocus && props.onFocus(e); }}
+      onBlur={e => { setFocused(false); props.onBlur && props.onBlur(e); }}
+      style={{
+        width: "100%", padding: "10px 14px", borderRadius: 8,
+        border: `1.5px solid ${focused ? T.borderFocus : T.border}`,
+        outline: "none", fontSize: 14, fontFamily: "inherit", fontWeight: 500,
+        background: T.surface, color: T.text,
+        boxShadow: focused ? `0 0 0 3px ${dark ? "rgba(99,102,241,.2)" : "rgba(59,91,219,.1)"}` : "none",
+        transition: "border-color .15s, box-shadow .15s",
+        boxSizing: "border-box",
+        ...props.style,
+      }} />
+  );
+};
+
+const Select = ({ T, children, ...props }) => (
+  <select {...props} style={{
+    width: "100%", padding: "10px 14px", borderRadius: 8,
+    border: `1.5px solid ${T.border}`, outline: "none",
+    fontSize: 14, fontFamily: "inherit", fontWeight: 500,
+    background: T.surface, color: T.text, cursor: "pointer",
+    appearance: "none",
+    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2394A3B8' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")`,
+    backgroundRepeat: "no-repeat", backgroundPosition: "right 14px center",
+    boxSizing: "border-box", transition: "border-color .15s",
+  }}>{children}</select>
+);
+
+const SegControl = ({ options, value, onChange, T, colorActive }) => (
+  <div style={{ display: "flex", background: T.surface2, borderRadius: 8, padding: 3, border: `1px solid ${T.border}`, gap: 2 }}>
+    {options.map(opt => {
+      const active = value === opt.value;
+      return (
+        <button key={opt.value} onClick={() => onChange(opt.value)} style={{
+          flex: 1, padding: "7px 10px", border: "none", borderRadius: 6,
+          cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 600,
+          transition: "all .15s",
+          background: active ? (colorActive || T.accent) : "transparent",
+          color: active ? "#fff" : T.textSec,
+          boxShadow: active ? "0 1px 4px rgba(0,0,0,.15)" : "none",
+        }}>{opt.label}</button>
+      );
+    })}
+  </div>
+);
+
+const Toggle = ({ value, onChange, label, sub, T, color }) => (
+  <div onClick={() => onChange(!value)} style={{ display: "flex", alignItems: "center", gap: 14, cursor: "pointer", userSelect: "none" }}>
+    <div style={{
+      width: 44, height: 24, borderRadius: 12, position: "relative",
+      background: value ? (color || T.accent) : T.surface2,
+      border: `1.5px solid ${value ? (color || T.accent) : T.border}`,
+      transition: "all .2s", flexShrink: 0,
+    }}>
+      <div style={{
+        position: "absolute", top: 2, left: value ? 20 : 2,
+        width: 16, height: 16, borderRadius: "50%", background: "#fff",
+        boxShadow: "0 1px 3px rgba(0,0,0,.3)", transition: "left .2s",
+      }} />
+    </div>
+    <div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: value ? (color || T.accent) : T.textSec }}>{label}</div>
+      {sub && <div style={{ fontSize: 11, color: T.textMute, marginTop: 2 }}>{sub}</div>}
+    </div>
+  </div>
+);
+
+const Hint = ({ children, T }) => (
+  <div style={{ fontSize: 11, color: T.textMute, marginTop: 6 }}>{children}</div>
+);
+
+const Card = ({ children, T, style }) => (
+  <div style={{ background: T.surface, borderRadius: 12, border: `1px solid ${T.border}`, padding: "20px 22px", marginBottom: 10, ...style }}>{children}</div>
+);
+
+const ResultRow = ({ label, value, muted, T, last }) => (
+  <div style={{
+    display: "flex", justifyContent: "space-between", alignItems: "center",
+    padding: "9px 0", borderBottom: last ? "none" : `1px solid rgba(255,255,255,.08)`,
+  }}>
+    <span style={{ fontSize: 12, color: muted ? "rgba(255,255,255,.4)" : "rgba(255,255,255,.65)", letterSpacing: ".2px" }}>{label}</span>
+    <span style={{ fontSize: 13, color: muted ? "rgba(255,255,255,.5)" : "#F1F5F9", fontWeight: 500 }}>{value}</span>
+  </div>
+);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
 export default function RentalPricer() {
-  const [dark,      setDark]      = useState(true);
-  const [mode,      setMode]      = useState("rental");
-  const [cost,      setCost]      = useState("");
-  const [duration,  setDuration]  = useState("");
-  const [term,      setTerm]      = useState("monthly_advance");
-  const [rental,    setRental]    = useState("");
-  const [irr,       setIrr]       = useState("24");
-  const [resMode,   setResMode]   = useState("pct");
-  const [resPct,    setResPct]    = useState("");
-  const [resVal,    setResVal]    = useState("");
-  const [depMode,   setDepMode]   = useState("pct");
-  const [depPct,    setDepPct]    = useState("");
-  const [depVal,    setDepVal]    = useState("");
-  const [useStep,   setUseStep]   = useState(false);
-  const [frMode,    setFrMode]    = useState("pct");
-  const [frPct,     setFrPct]     = useState("");
-  const [frVal,     setFrVal]     = useState("");
-  // Schedule
+  const [dark,        setDark]        = useState(false);
+  const [mode,        setMode]        = useState("rental");
+  const [cost,        setCost]        = useState("");
+  const [duration,    setDuration]    = useState("");
+  const [term,        setTerm]        = useState("monthly_advance");
+  const [rental,      setRental]      = useState("");
+  const [irr,         setIrr]         = useState("24");
+  const [resMode,     setResMode]     = useState("pct");
+  const [resPct,      setResPct]      = useState("");
+  const [resVal,      setResVal]      = useState("");
+  const [depMode,     setDepMode]     = useState("pct");
+  const [depPct,      setDepPct]      = useState("");
+  const [depVal,      setDepVal]      = useState("");
+  const [useStep,     setUseStep]     = useState(false);
+  const [frMode,      setFrMode]      = useState("pct");
+  const [frPct,       setFrPct]       = useState("");
+  const [frVal,       setFrVal]       = useState("");
   const [startDate,   setStartDate]   = useState(todayStr());
   const [clientName,  setClientName]  = useState("");
-  const [showSchedule, setShowSchedule] = useState(false);
-  const [result,   setResult]   = useState(null);
-  const [schedule, setSchedule] = useState([]);
-  const [error,    setError]    = useState("");
-  const [pdfLoading, setPdfLoading] = useState(false);
-  const scheduleRef = useRef(null);
+  const [showSched,   setShowSched]   = useState(false);
+  const [result,      setResult]      = useState(null);
+  const [schedule,    setSchedule]    = useState([]);
+  const [error,       setError]       = useState("");
+  const [pdfLoading,  setPdfLoading]  = useState(false);
 
+  const T = dark ? DARK : LIGHT;
   const cv = parseFloat(cost) || 0;
   const pLabel = term.includes("quarterly") ? "quarter" : "month";
 
@@ -378,7 +454,7 @@ export default function RentalPricer() {
   };
 
   const calculate = useCallback(() => {
-    setError(""); setResult(null); setSchedule([]); setShowSchedule(false);
+    setError(""); setResult(null); setSchedule([]); setShowSched(false);
     const c   = parseFloat(cost);
     const d   = parseInt(duration);
     const dep = getDeposit();
@@ -392,196 +468,183 @@ export default function RentalPricer() {
         const residual = getResidual();
         const r = solveRental({ cost: c, targetIRR: irrVal, duration: d, paymentTerm: term, residual, deposit: dep, firstRental: fr });
         const { totalPeriods } = buildCashflows({ cost: c, rental: r, duration: d, paymentTerm: term, residual, deposit: dep, firstRental: fr });
-        const normalPeriods = fr != null ? totalPeriods - 1 : totalPeriods;
-        const tot = (fr != null ? fr : 0) + r * normalPeriods;
-        const res = { mode: "rental", rental: r, irr: irrVal, residual, residualPct: (residual / c) * 100, deposit: dep, depositPct: dep > 0 ? (dep / c) * 100 : 0, firstRental: fr, firstRentalPct: fr ? (fr / c * 100) : 0, totalPeriods, totalRental: tot, cost: c, ppy };
+        const tot = (fr != null ? fr : 0) + r * (fr != null ? totalPeriods - 1 : totalPeriods);
+        const res = { mode:"rental", rental:r, irr:irrVal, residual, residualPct:(residual/c)*100, deposit:dep, depositPct:dep>0?(dep/c)*100:0, firstRental:fr, firstRentalPct:fr?(fr/c*100):0, totalPeriods, totalRental:tot, cost:c, ppy };
         setResult(res);
-        const sched = generateSchedule({ rental: r, duration: d, paymentTerm: term, deposit: dep, firstRental: fr, startDate: new Date(startDate) });
-        setSchedule(sched);
+        setSchedule(generateSchedule({ rental:r, duration:d, paymentTerm:term, deposit:dep, firstRental:fr, startDate:new Date(startDate) }));
       } else {
         const r = parseFloat(rental);
         if (!r) return setError("Please enter rental per period.");
         const residual = getResidual();
-        const { cfs, totalPeriods } = buildCashflows({ cost: c, rental: r, duration: d, paymentTerm: term, residual, deposit: dep, firstRental: fr });
+        const { cfs, totalPeriods } = buildCashflows({ cost:c, rental:r, duration:d, paymentTerm:term, residual, deposit:dep, firstRental:fr });
         const periodicRate = solveIRR(cfs);
         const ann = annualIRR(periodicRate, ppy);
-        if (isNaN(ann) || !isFinite(ann)) return setError("Could not converge. Check your inputs.");
-        const normalPeriods = fr != null ? totalPeriods - 1 : totalPeriods;
-        const tot = (fr != null ? fr : 0) + r * normalPeriods;
-        const res = { mode: "irr", irr: ann, periodicRate: periodicRate * 100, ppy, rental: r, residual, residualPct: (residual / c) * 100, deposit: dep, depositPct: dep > 0 ? (dep / c) * 100 : 0, firstRental: fr, firstRentalPct: fr ? (fr / c * 100) : 0, totalPeriods, totalRental: tot, cost: c };
+        if (isNaN(ann) || !isFinite(ann)) return setError("Could not converge. Check inputs.");
+        const tot = (fr != null ? fr : 0) + r * (fr != null ? totalPeriods - 1 : totalPeriods);
+        const res = { mode:"irr", irr:ann, periodicRate:periodicRate*100, ppy, rental:r, residual, residualPct:(residual/c)*100, deposit:dep, depositPct:dep>0?(dep/c)*100:0, firstRental:fr, firstRentalPct:fr?(fr/c*100):0, totalPeriods, totalRental:tot, cost:c };
         setResult(res);
-        const sched = generateSchedule({ rental: r, duration: d, paymentTerm: term, deposit: dep, firstRental: fr, startDate: new Date(startDate) });
-        setSchedule(sched);
+        setSchedule(generateSchedule({ rental:r, duration:d, paymentTerm:term, deposit:dep, firstRental:fr, startDate:new Date(startDate) }));
       }
     } catch { setError("Calculation error. Please check your inputs."); }
   }, [mode, cost, duration, term, rental, irr, resMode, resPct, resVal, depMode, depPct, depVal, useStep, frMode, frPct, frVal, startDate]);
 
-  const handleDownloadPDF = async () => {
+  const handlePDF = async () => {
     if (!result || !schedule.length) return;
     setPdfLoading(true);
-    try {
-      await downloadPDF({ schedule, result, clientName, startDate, term, pLabel });
-    } catch (e) {
-      console.error("PDF error:", e);
-      setError("PDF download failed. Please check your internet connection and try again.");
-    }
+    try { await downloadPDF({ schedule, result, clientName, startDate, term, pLabel }); }
+    catch (e) { setError("PDF failed. Check internet connection and try again."); }
     setPdfLoading(false);
   };
-
-  // ── Theme
-  const T = {
-    bg:       dark ? "#0d0d0d" : "#f0efe9",
-    surface:  dark ? "#161616" : "#ffffff",
-    surface2: dark ? "#1c1c1c" : "#f7f6f2",
-    border:   dark ? "rgba(255,255,255,.07)" : "rgba(0,0,0,.08)",
-    text:     dark ? "#f0f0f0" : "#111111",
-    textSec:  dark ? "#666666" : "#aaaaaa",
-    accent:   "#e8b000",
-    green:    "#2ec27e",
-    greenSoft:"rgba(46,194,126,.12)",
-    blue:     "#5b8def",
-    blueSoft: "rgba(91,141,239,.12)",
-  };
-
-  const pillColors = { activeBg: T.accent, activeText: "#111", inactiveText: T.textSec, shadow: `0 2px 10px rgba(232,176,0,.3)` };
-  const segStyle = { display: "flex", background: T.surface2, borderRadius: 11, padding: 3, border: `1px solid ${T.border}` };
-  const cardStyle = { background: T.surface, borderRadius: 18, border: `1px solid ${T.border}`, padding: "20px 22px", marginBottom: 12 };
 
   const totalPayable = schedule.reduce((s, r) => s + r.amount, 0);
 
   return (
-    <div style={{ fontFamily: "'DM Sans','Helvetica Neue',sans-serif", minHeight: "100vh", background: T.bg, color: T.text, transition: "background .3s" }}>
+    <div style={{ fontFamily: "'Inter', 'Helvetica Neue', sans-serif", minHeight: "100vh", background: T.bg, color: T.text, transition: "background .25s, color .25s" }}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=Syne:wght@700;800&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Libre+Baskerville:wght@700&display=swap');
         *{box-sizing:border-box;margin:0;padding:0}
-        ::-webkit-scrollbar{width:3px}::-webkit-scrollbar-thumb{background:#333;border-radius:2px}
-        input::placeholder{color:#555}input[type=number]::-webkit-inner-spin-button{opacity:.2}
-        input[type=date]::-webkit-calendar-picker-indicator{opacity:.4;cursor:pointer}
-        select option{background:#111;color:#f0f0f0}
-        .calcbtn,.dlbtn{border:none;width:100%;padding:15px;border-radius:14px;font-family:inherit;font-size:14px;font-weight:700;letter-spacing:1.2px;cursor:pointer;transition:all .25s}
-        .calcbtn:hover,.dlbtn:hover{transform:translateY(-2px);filter:brightness(1.08)}
-        .calcbtn:active,.dlbtn:active{transform:translateY(0)}
-        .modebtn{flex:1;padding:15px 10px;border:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;border-radius:13px;margin:3px;transition:all .25s;letter-spacing:.3px}
-        .tog-wrap{display:flex;align-items:center;gap:12px;cursor:pointer;user-select:none}
-        .tog-track{width:44px;height:26px;border-radius:13px;position:relative;transition:background .25s;flex-shrink:0}
-        .tog-dot{position:absolute;top:3px;width:20px;height:20px;border-radius:50%;background:#fff;transition:left .25s;box-shadow:0 1px 5px rgba(0,0,0,.4)}
-        .result-card,.sched-card{animation:fadeUp .3s cubic-bezier(.16,1,.3,1)}
-        @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
-        .sched-row:hover td{background:rgba(232,176,0,.06)!important}
-        .sched-row td{transition:background .15s}
-        .chip{display:inline-block;font-size:10px;font-weight:600;letter-spacing:.5px;padding:2px 8px;border-radius:20px}
+        ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#CBD5E1;border-radius:2px}
+        input::placeholder{color:#94A3B8!important}
+        input[type=number]::-webkit-inner-spin-button{opacity:.25}
+        input[type=date]::-webkit-calendar-picker-indicator{opacity:.4;cursor:pointer;filter:invert(0)}
+        select option{background:#fff;color:#0F1729}
+        .btn-primary{border:none;width:100%;padding:13px 20px;border-radius:10px;font-family:inherit;font-size:14px;font-weight:600;letter-spacing:.3px;cursor:pointer;transition:all .2s}
+        .btn-primary:hover{transform:translateY(-1px);filter:brightness(1.06)}
+        .btn-primary:active{transform:translateY(0)}
+        .btn-outline{border:none;width:100%;padding:12px 20px;border-radius:10px;font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:8px}
+        .btn-outline:hover{transform:translateY(-1px)}
+        .mode-tab{flex:1;padding:12px 8px;border:none;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;border-radius:9px;margin:3px;transition:all .2s;text-align:center}
+        .anim-in{animation:slideIn .28s cubic-bezier(.16,1,.3,1)}
+        @keyframes slideIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+        .sched-tr:hover td{background:rgba(59,91,219,.04)!important}
+        .sched-tr td{transition:background .1s}
       `}</style>
 
-      <div style={{ maxWidth: 560, margin: "0 auto", padding: "32px 16px 64px" }}>
+      <div style={{ maxWidth: 580, margin: "0 auto", padding: "36px 18px 72px" }}>
 
-        {/* ── TOP BAR ── */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 32 }}>
+        {/* ── HEADER ── */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 36 }}>
           <div>
-            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "3px", color: T.textSec, marginBottom: 5 }}>RENTAL BUSINESS TOOLS</div>
-            <h1 style={{ fontFamily: "'Syne',sans-serif", fontSize: "1.9rem", fontWeight: 800, lineHeight: 1, color: T.text }}>
-              Lease<span style={{ color: T.accent }}>Pricer</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: T.accent }} />
+              <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "2px", textTransform: "uppercase", color: T.textMute }}>Rental Business Tools</span>
+            </div>
+            <h1 style={{ fontFamily: "'Libre Baskerville', Georgia, serif", fontSize: "2rem", fontWeight: 700, color: T.text, lineHeight: 1.1 }}>
+              Lease Pricer
             </h1>
+            <p style={{ fontSize: 12, color: T.textMute, marginTop: 5 }}>IRR · Rental · Schedule · PDF Export</p>
           </div>
           <button onClick={() => setDark(v => !v)} style={{
-            background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 50,
-            width: 46, height: 46, cursor: "pointer", fontSize: 20,
-            display: "flex", alignItems: "center", justifyContent: "center", transition: "all .25s",
-          }}>{dark ? "☀️" : "🌙"}</button>
+            background: T.surface, border: `1px solid ${T.border}`,
+            borderRadius: 8, width: 40, height: 40, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: 16, transition: "all .2s", flexShrink: 0,
+          }} title="Toggle theme">{dark ? "☀️" : "🌙"}</button>
         </div>
 
-        {/* ── MODE ── */}
-        <div style={{ ...cardStyle, padding: 6 }}>
+        {/* ── MODE TABS ── */}
+        <Card T={T} style={{ padding: 6, marginBottom: 10 }}>
           <div style={{ display: "flex" }}>
             {[
-              { id: "rental", icon: "₹", label: "Find Rental", sub: "Target IRR → rental rate" },
-              { id: "irr",    icon: "%", label: "Find IRR",    sub: "Known rental → IRR" },
+              { id: "rental", label: "Find Rental", sub: "Target IRR → required rental" },
+              { id: "irr",    label: "Find IRR",    sub: "Known rental → achieved IRR"  },
             ].map(m => (
-              <button key={m.id} className="modebtn" onClick={() => { setMode(m.id); setResult(null); setError(""); setShowSchedule(false); }}
-                style={{ background: mode === m.id ? T.accent : "transparent", color: mode === m.id ? "#111" : T.textSec, boxShadow: mode === m.id ? `0 2px 16px rgba(232,176,0,.25)` : "none" }}>
-                <div style={{ fontSize: 22, marginBottom: 3 }}>{m.icon}</div>
-                <div>{m.label}</div>
-                <div style={{ fontSize: 10, fontWeight: 400, opacity: .65, marginTop: 2 }}>{m.sub}</div>
+              <button key={m.id} className="mode-tab"
+                onClick={() => { setMode(m.id); setResult(null); setError(""); setShowSched(false); }}
+                style={{
+                  background: mode === m.id ? T.accent : "transparent",
+                  color: mode === m.id ? "#fff" : T.textSec,
+                  boxShadow: mode === m.id ? "0 2px 8px rgba(0,0,0,.12)" : "none",
+                }}>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>{m.label}</div>
+                <div style={{ fontSize: 10, fontWeight: 400, opacity: .7, marginTop: 2 }}>{m.sub}</div>
               </button>
             ))}
           </div>
-        </div>
+        </Card>
 
         {/* ── ASSET DETAILS ── */}
-        <div style={cardStyle}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "1.5px", color: T.textSec, marginBottom: 16 }}>ASSET DETAILS</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+        <Card T={T}>
+          <SectionLabel T={T}>Asset Details</SectionLabel>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
             <div>
-              <div style={{ fontSize: 11, color: T.textSec, marginBottom: 6 }}>Cost (₹)</div>
-              <StyledInput dark={dark} accentColor={T.accent} type="number" placeholder="e.g. 150000" value={cost} onChange={e => setCost(e.target.value)} />
+              <FieldLabel T={T} right="₹">Asset Cost</FieldLabel>
+              <Input T={T} dark={dark} type="number" placeholder="150000" value={cost} onChange={e => setCost(e.target.value)} />
             </div>
             <div>
-              <div style={{ fontSize: 11, color: T.textSec, marginBottom: 6 }}>Duration (months)</div>
-              <StyledInput dark={dark} accentColor={T.accent} type="number" placeholder="e.g. 36" value={duration} onChange={e => setDuration(e.target.value)} />
+              <FieldLabel T={T} right="months">Duration</FieldLabel>
+              <Input T={T} dark={dark} type="number" placeholder="36" value={duration} onChange={e => setDuration(e.target.value)} />
             </div>
           </div>
           <div>
-            <div style={{ fontSize: 11, color: T.textSec, marginBottom: 6 }}>Payment Terms</div>
-            <StyledSelect dark={dark} value={term} onChange={e => setTerm(e.target.value)}>
+            <FieldLabel T={T}>Payment Terms</FieldLabel>
+            <Select T={T} value={term} onChange={e => setTerm(e.target.value)}>
               {TERMS.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </StyledSelect>
+            </Select>
           </div>
-        </div>
+        </Card>
 
         {/* ── IRR / RENTAL ── */}
-        <div style={cardStyle}>
+        <Card T={T}>
           {mode === "rental" ? (
             <>
-              <div style={{ fontSize: 11, color: T.textSec, marginBottom: 6 }}>Target IRR (% per annum)</div>
-              <StyledInput dark={dark} accentColor={T.accent} type="number" placeholder="e.g. 24" value={irr} onChange={e => setIrr(e.target.value)} />
-              {irr && <div style={{ fontSize: 11, color: T.accent, marginTop: 6, fontWeight: 500 }}>{irr}% p.a. target return</div>}
+              <FieldLabel T={T} right="% per annum">Target IRR</FieldLabel>
+              <Input T={T} dark={dark} type="number" placeholder="24" value={irr} onChange={e => setIrr(e.target.value)} />
+              {irr && <Hint T={T}>{irr}% annualised return target</Hint>}
             </>
           ) : (
             <>
-              <div style={{ fontSize: 11, color: T.textSec, marginBottom: 6 }}>{useStep ? `Regular Rental — ${pLabel} 2+ (₹)` : `Rental per ${pLabel} (₹)`}</div>
-              <StyledInput dark={dark} accentColor={T.accent} type="number" placeholder="e.g. 5000" value={rental} onChange={e => setRental(e.target.value)} />
+              <FieldLabel T={T} right="₹">{useStep ? `Regular Rental — ${pLabel} 2 onwards` : `Rental per ${pLabel}`}</FieldLabel>
+              <Input T={T} dark={dark} type="number" placeholder="5000" value={rental} onChange={e => setRental(e.target.value)} />
             </>
           )}
-        </div>
+        </Card>
 
-        {/* ── RESIDUAL ── */}
-        <div style={cardStyle}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "1.5px", color: T.textSec, marginBottom: 14 }}>RESIDUAL VALUE <span style={{ fontSize: 9, fontWeight: 400, opacity: .5 }}>(internal only — not shown in PDF)</span></div>
-          <div style={segStyle}>
-            <Pill active={resMode === "pct"} onClick={() => setResMode("pct")} colors={pillColors}>% of Cost</Pill>
-            <Pill active={resMode === "value"} onClick={() => setResMode("value")} colors={pillColors}>Fixed ₹</Pill>
-          </div>
+        {/* ── RESIDUAL VALUE ── */}
+        <Card T={T}>
+          <SectionLabel T={T}>Residual Value <span style={{ fontWeight: 400, letterSpacing: 0, textTransform: "none", fontSize: 10, color: T.textMute }}>· internal only, not shown in PDF</span></SectionLabel>
+          <SegControl
+            options={[{ value: "pct", label: "% of Cost" }, { value: "value", label: "Fixed ₹" }]}
+            value={resMode} onChange={setResMode} T={T} colorActive={T.accent}
+          />
           <div style={{ marginTop: 12 }}>
-            <StyledInput dark={dark} accentColor={T.accent} type="number"
-              placeholder={resMode === "pct" ? "e.g. 10 → 10% of cost" : "e.g. 15000"}
+            <Input T={T} dark={dark} type="number"
+              placeholder={resMode === "pct" ? "e.g. 10 for 10%" : "e.g. 15000"}
               value={resMode === "pct" ? resPct : resVal}
               onChange={e => resMode === "pct" ? setResPct(e.target.value) : setResVal(e.target.value)} />
           </div>
           {cv > 0 && ((resMode === "pct" && resPct) || (resMode === "value" && resVal)) && (
-            <div style={{ fontSize: 11, color: T.accent, marginTop: 7, fontWeight: 500 }}>
+            <Hint T={T}>
               {resMode === "pct" ? `= ${fmt(parseFloat(resPct) / 100 * cv)}` : `= ${(parseFloat(resVal) / cv * 100).toFixed(2)}% of cost`}
-            </div>
+            </Hint>
           )}
-        </div>
+        </Card>
 
-        {/* ── DEPOSIT ── */}
-        <div style={{ ...cardStyle, borderColor: `${T.green}44`, background: dark ? "rgba(46,194,126,.04)" : "rgba(46,194,126,.03)" }}>
+        {/* ── SECURITY DEPOSIT ── */}
+        <div style={{
+          background: dark ? T.greenBg : "#F0FDF4",
+          border: `1px solid ${T.greenBorder}`,
+          borderRadius: 12, padding: "18px 22px", marginBottom: 10,
+        }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "1.5px", color: T.green }}>SECURITY DEPOSIT</div>
-            <span className="chip" style={{ background: T.greenSoft, color: T.green }}>REFUNDED AT END · OPTIONAL</span>
+            <SectionLabel T={T} style={{ marginBottom: 0 }}>
+              <span style={{ color: dark ? T.green : "#166534", fontSize: 10, fontWeight: 700, letterSpacing: "1.5px" }}>Security Deposit</span>
+            </SectionLabel>
+            <span style={{ fontSize: 10, fontWeight: 600, color: dark ? T.green : "#166534", background: dark ? "rgba(74,222,128,.12)" : "#DCFCE7", padding: "2px 10px", borderRadius: 20 }}>REFUNDED AT END</span>
           </div>
-          <div style={{ ...segStyle, borderColor: `${T.green}33` }}>
-            <Pill active={depMode === "pct"} onClick={() => setDepMode("pct")} colors={{ activeBg: T.green, activeText: "#fff", inactiveText: T.textSec, shadow: "0 2px 10px rgba(46,194,126,.3)" }}>% of Cost</Pill>
-            <Pill active={depMode === "value"} onClick={() => setDepMode("value")} colors={{ activeBg: T.green, activeText: "#fff", inactiveText: T.textSec, shadow: "0 2px 10px rgba(46,194,126,.3)" }}>Fixed ₹</Pill>
-          </div>
+          <SegControl
+            options={[{ value: "pct", label: "% of Cost" }, { value: "value", label: "Fixed ₹" }]}
+            value={depMode} onChange={setDepMode} T={T} colorActive={dark ? "#16A34A" : "#15803D"}
+          />
           <div style={{ marginTop: 12 }}>
-            <StyledInput dark={dark} accentColor={T.green} type="number"
-              placeholder={depMode === "pct" ? "e.g. 10 → 10% of cost" : "e.g. 15000"}
+            <Input T={T} dark={dark} type="number"
+              placeholder={depMode === "pct" ? "e.g. 10 for 10%" : "e.g. 15000"}
               value={depMode === "pct" ? depPct : depVal}
               onChange={e => depMode === "pct" ? setDepPct(e.target.value) : setDepVal(e.target.value)}
-              style={{ borderColor: `${T.green}44` }} />
+              style={{ borderColor: T.greenBorder }} />
           </div>
           {cv > 0 && ((depMode === "pct" && depPct) || (depMode === "value" && depVal)) && (
-            <div style={{ fontSize: 11, color: T.green, marginTop: 7, fontWeight: 500 }}>
+            <div style={{ fontSize: 11, color: dark ? T.green : "#166534", marginTop: 7 }}>
               {depMode === "pct"
                 ? `= ${fmt(parseFloat(depPct) / 100 * cv)}  ·  net outlay = ${fmt(cv - parseFloat(depPct) / 100 * cv)}`
                 : `= ${(parseFloat(depVal) / cv * 100).toFixed(2)}% of cost  ·  net outlay = ${fmt(cv - parseFloat(depVal))}`}
@@ -590,138 +653,159 @@ export default function RentalPricer() {
         </div>
 
         {/* ── STEPPED RENTAL ── */}
-        <div style={{ ...cardStyle, borderColor: useStep ? `${T.blue}55` : T.border, background: useStep ? T.blueSoft : T.surface }}>
-          <div className="tog-wrap" onClick={() => { setUseStep(v => !v); setResult(null); }}>
-            <div className="tog-track" style={{ background: useStep ? T.blue : (dark ? "#2a2a2a" : "#ddd") }}>
-              <div className="tog-dot" style={{ left: useStep ? "21px" : "3px" }} />
-            </div>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: useStep ? T.blue : T.textSec }}>Stepped First {pLabel === "month" ? "Month" : "Quarter"} Rental</div>
-              <div style={{ fontSize: 11, color: T.textSec, marginTop: 1 }}>Larger upfront, then uniform for remaining periods</div>
-            </div>
-          </div>
+        <div style={{
+          background: useStep ? (dark ? T.blueBg : "#EFF6FF") : T.surface,
+          border: `1px solid ${useStep ? T.blueBorder : T.border}`,
+          borderRadius: 12, padding: "18px 22px", marginBottom: 10,
+          transition: "all .2s",
+        }}>
+          <Toggle value={useStep} onChange={v => { setUseStep(v); setResult(null); }}
+            label={`Stepped First ${pLabel === "month" ? "Month" : "Quarter"} Rental`}
+            sub="Larger upfront, then uniform remaining periods"
+            T={T} color={dark ? T.blue : "#1D4ED8"} />
           {useStep && (
-            <div style={{ marginTop: 18 }}>
-              <div style={{ fontSize: 11, background: T.blueSoft, color: T.blue, borderRadius: 8, padding: "8px 12px", marginBottom: 14, fontWeight: 500 }}>
-                First {pLabel} collected {term.includes("advance") ? "at signing" : "at end of period 1"}. Periods 2+ use regular rental.
+            <div style={{ marginTop: 18 }} className="anim-in">
+              <div style={{ fontSize: 11, color: dark ? T.blue : "#1D4ED8", background: dark ? "rgba(147,197,253,.08)" : "#DBEAFE", borderRadius: 6, padding: "8px 12px", marginBottom: 14 }}>
+                First {pLabel} collected {term.includes("advance") ? "at signing" : "end of period 1"}. Periods 2+ use regular rental above.
               </div>
-              <div style={segStyle}>
-                <Pill active={frMode === "pct"} onClick={() => setFrMode("pct")} colors={{ activeBg: T.blue, activeText: "#fff", inactiveText: T.textSec, shadow: "0 2px 10px rgba(91,141,239,.3)" }}>% of Cost</Pill>
-                <Pill active={frMode === "value"} onClick={() => setFrMode("value")} colors={{ activeBg: T.blue, activeText: "#fff", inactiveText: T.textSec, shadow: "0 2px 10px rgba(91,141,239,.3)" }}>Fixed ₹</Pill>
-              </div>
+              <SegControl
+                options={[{ value: "pct", label: "% of Cost" }, { value: "value", label: "Fixed ₹" }]}
+                value={frMode} onChange={setFrMode} T={T} colorActive={dark ? "#3B82F6" : "#1D4ED8"}
+              />
               <div style={{ marginTop: 12 }}>
-                <StyledInput dark={dark} accentColor={T.blue} type="number"
-                  placeholder={frMode === "pct" ? "e.g. 20 → 20% of cost" : "e.g. 30000"}
+                <Input T={T} dark={dark} type="number"
+                  placeholder={frMode === "pct" ? "e.g. 20 for 20% of cost" : "e.g. 30000"}
                   value={frMode === "pct" ? frPct : frVal}
                   onChange={e => frMode === "pct" ? setFrPct(e.target.value) : setFrVal(e.target.value)}
-                  style={{ borderColor: `${T.blue}44` }} />
+                  style={{ borderColor: T.blueBorder }} />
               </div>
+              {cv > 0 && ((frMode === "pct" && frPct) || (frMode === "value" && frVal)) && (
+                <div style={{ fontSize: 11, color: dark ? T.blue : "#1D4ED8", marginTop: 7, lineHeight: 1.8 }}>
+                  {(() => {
+                    const fr = frMode === "pct" ? (parseFloat(frPct) / 100) * cv : parseFloat(frVal) || 0;
+                    const r  = parseFloat(rental) || 0;
+                    return <>
+                      First {pLabel}: <strong>{fmtD(fr)}</strong>
+                      {frMode === "value" ? ` (${(fr/cv*100).toFixed(2)}% of cost)` : ` = ${fmt(fr)}`}
+                      {r > 0 && <><br />Uplift vs regular: <strong>+{fmtD(fr-r)}</strong></>}
+                    </>;
+                  })()}
+                </div>
+              )}
             </div>
           )}
         </div>
 
         {/* ── SCHEDULE SETTINGS ── */}
-        <div style={{ ...cardStyle, borderColor: `${T.accent}33`, background: dark ? "rgba(232,176,0,.04)" : "rgba(232,176,0,.03)" }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "1.5px", color: T.accent, marginBottom: 14 }}>PAYMENT SCHEDULE SETTINGS</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div style={{ background: dark ? T.amberBg : "#FFFBEB", border: `1px solid ${T.amberBorder}`, borderRadius: 12, padding: "18px 22px", marginBottom: 16 }}>
+          <SectionLabel T={T}><span style={{ color: dark ? T.amber : "#92400E" }}>Schedule & PDF Settings</span></SectionLabel>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
             <div>
-              <div style={{ fontSize: 11, color: T.textSec, marginBottom: 6 }}>Rent Start Date</div>
-              <StyledInput dark={dark} accentColor={T.accent} type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={{ borderColor: `${T.accent}44` }} />
+              <FieldLabel T={T}>Rent Start Date</FieldLabel>
+              <Input T={T} dark={dark} type="date" value={startDate} onChange={e => setStartDate(e.target.value)} style={{ borderColor: T.amberBorder }} />
             </div>
             <div>
-              <div style={{ fontSize: 11, color: T.textSec, marginBottom: 6 }}>Client Name (for PDF)</div>
-              <StyledInput dark={dark} accentColor={T.accent} type="text" placeholder="e.g. Acme Corp" value={clientName} onChange={e => setClientName(e.target.value)} style={{ borderColor: `${T.accent}44` }} />
+              <FieldLabel T={T}>Client Name <span style={{ fontWeight: 400, color: T.textMute }}>(PDF)</span></FieldLabel>
+              <Input T={T} dark={dark} type="text" placeholder="e.g. Acme Corp" value={clientName} onChange={e => setClientName(e.target.value)} style={{ borderColor: T.amberBorder }} />
             </div>
           </div>
         </div>
 
         {/* ── CALCULATE BUTTON ── */}
-        <button className="calcbtn" onClick={calculate} style={{
-          background: `linear-gradient(135deg, ${T.accent}, #c89000)`,
-          color: "#111", marginBottom: 14,
-          boxShadow: `0 6px 24px rgba(232,176,0,.3)`,
-        }}>CALCULATE & GENERATE SCHEDULE</button>
+        <button className="btn-primary" onClick={calculate} style={{
+          background: T.accent, color: "#fff", marginBottom: 12,
+          boxShadow: `0 4px 14px rgba(30,64,175,.25)`,
+        }}>
+          Calculate &amp; Generate Schedule
+        </button>
 
         {error && (
-          <div style={{ background: "rgba(255,59,48,.1)", border: "1px solid rgba(255,59,48,.25)", borderRadius: 12, padding: "13px 16px", color: "#ff453a", fontSize: 13, marginBottom: 14, fontWeight: 500 }}>
-            ⚠️ {error}
+          <div style={{ background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10, padding: "12px 16px", color: "#B91C1C", fontSize: 13, marginBottom: 12, fontWeight: 500 }}>
+            {error}
           </div>
         )}
 
-        {/* ── RESULT SUMMARY ── */}
+        {/* ── RESULT CARD ── */}
         {result && (
-          <div className="result-card" style={{ background: T.surface, borderRadius: 20, overflow: "hidden", border: `1px solid ${T.accent}55`, boxShadow: `0 0 0 4px ${T.accent}10, 0 20px 60px rgba(0,0,0,.15)`, marginBottom: 14 }}>
-            <div style={{ padding: "24px 24px 18px", background: `linear-gradient(135deg, ${T.accent}18, ${T.accent}06)`, borderBottom: `1px solid ${T.accent}33` }}>
-              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "2.5px", color: T.accent, marginBottom: 8, opacity: .8 }}>
+          <div className="anim-in" style={{ borderRadius: 14, overflow: "hidden", marginBottom: 10, boxShadow: "0 8px 32px rgba(0,0,0,.15)" }}>
+            {/* Hero */}
+            <div style={{ background: dark ? "#1C2333" : "#0F1729", padding: "24px 24px 20px" }}>
+              <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "2px", color: "rgba(255,255,255,.4)", marginBottom: 8 }}>
                 {result.mode === "rental" ? "REQUIRED RENTAL PER PERIOD" : "ACHIEVED IRR"}
               </div>
-              <div style={{ fontFamily: "'Syne',sans-serif", fontSize: "3rem", fontWeight: 800, color: T.accent, lineHeight: 1 }}>
+              <div style={{ fontFamily: "'Libre Baskerville', Georgia, serif", fontSize: "2.8rem", fontWeight: 700, color: "#fff", lineHeight: 1 }}>
                 {result.mode === "rental" ? fmtD(result.rental) : fmtPct(result.irr)}
               </div>
-              {result.mode === "irr" && <div style={{ fontSize: 12, color: T.textSec, marginTop: 8 }}>{fmtPct(result.periodicRate)} per {result.ppy === 12 ? "month" : "quarter"}</div>}
+              {result.mode === "irr" && (
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,.5)", marginTop: 8 }}>
+                  {fmtPct(result.periodicRate)} per {result.ppy === 12 ? "month" : "quarter"}
+                </div>
+              )}
+              {result.mode === "rental" && result.firstRental > 0 && (
+                <div style={{ fontSize: 12, color: "#93C5FD", marginTop: 8 }}>
+                  First {pLabel}: {fmtD(result.firstRental)} · then {fmtD(result.rental)} / {pLabel}
+                </div>
+              )}
             </div>
-            <div style={{ padding: "4px 24px 20px" }}>
-              <ResultLine label="Asset Cost" value={fmt(result.cost)} dark={dark} />
-              {result.deposit > 0 && <ResultLine label="Security Deposit" value={`${fmt(result.deposit)} (${result.depositPct.toFixed(2)}%)`} accent dark={dark} />}
-              {result.deposit > 0 && <ResultLine label="Net Outlay" value={fmt(result.cost - result.deposit)} accent dark={dark} />}
-              {result.firstRental > 0 && <ResultLine label={`First ${pLabel.charAt(0).toUpperCase()+pLabel.slice(1)} Rental`} value={fmtD(result.firstRental)} dark={dark} />}
-              <ResultLine label={`Regular Rental / ${pLabel}`} value={fmtD(result.rental)} dark={dark} />
-              <ResultLine label="No. of Periods" value={`${result.totalPeriods} ${result.ppy === 12 ? "months" : "quarters"}`} dark={dark} />
-              <ResultLine label="Total Rental Income" value={fmt(result.totalRental)} dark={dark} />
-              <ResultLine label="Residual Value (internal)" value={`${fmtD(result.residual)} (${result.residualPct.toFixed(2)}%)`} dark={dark} />
-              <ResultLine label="Total Recovery" value={fmt(result.totalRental + result.residual - result.deposit)} bold dark={dark} separator />
+            {/* Details */}
+            <div style={{ background: dark ? "#141B2C" : "#111827", padding: "4px 24px 16px" }}>
+              <ResultRow label="Asset Cost" value={fmt(result.cost)} T={T} />
+              {result.deposit > 0 && <ResultRow label="Security Deposit" value={`${fmt(result.deposit)} (${result.depositPct.toFixed(2)}%)`} T={T} />}
+              {result.deposit > 0 && <ResultRow label="Net Outlay" value={fmt(result.cost - result.deposit)} T={T} />}
+              {result.firstRental > 0 && <ResultRow label={`First ${pLabel.charAt(0).toUpperCase()+pLabel.slice(1)} Rental`} value={fmtD(result.firstRental)} T={T} />}
+              <ResultRow label={`Regular Rental / ${pLabel}`} value={fmtD(result.rental)} T={T} />
+              <ResultRow label="No. of Periods" value={`${result.totalPeriods} ${result.ppy===12?"months":"quarters"}`} T={T} />
+              <ResultRow label="Total Rental Income" value={fmt(result.totalRental)} T={T} />
+              <ResultRow label="Residual (internal)" value={`${fmtD(result.residual)} · ${result.residualPct.toFixed(2)}%`} muted T={T} />
+              <ResultRow label="Total Recovery" value={fmt(result.totalRental + result.residual - result.deposit)} T={T} last />
             </div>
           </div>
         )}
 
-        {/* ── PAYMENT SCHEDULE TABLE ── */}
+        {/* ── SCHEDULE TABLE ── */}
         {schedule.length > 0 && (
-          <div className="sched-card" ref={scheduleRef} style={{ background: T.surface, borderRadius: 20, border: `1px solid ${T.border}`, overflow: "hidden", marginBottom: 14 }}>
-            {/* Schedule header */}
-            <div style={{ padding: "18px 22px 14px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div className="anim-in" style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 14, overflow: "hidden", marginBottom: 10 }}>
+            <div style={{ padding: "16px 22px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: T.text }}>Payment Schedule</div>
                 <div style={{ fontSize: 11, color: T.textSec, marginTop: 2 }}>
-                  {schedule.length} payment{schedule.length > 1 ? "s" : ""} · Total payable: <strong style={{ color: T.text }}>{fmt(totalPayable)}</strong>
+                  {schedule.length} payments · Total: <strong style={{ color: T.text }}>{fmt(totalPayable)}</strong>
                 </div>
               </div>
-              <button onClick={() => setShowSchedule(v => !v)} style={{
+              <button onClick={() => setShowSched(v => !v)} style={{
                 background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 8,
-                padding: "6px 14px", cursor: "pointer", fontFamily: "inherit",
-                fontSize: 12, fontWeight: 600, color: T.textSec,
-              }}>
-                {showSchedule ? "Hide" : "Show"} Schedule
-              </button>
+                padding: "6px 16px", cursor: "pointer", fontFamily: "inherit",
+                fontSize: 12, fontWeight: 600, color: T.textSec, transition: "all .15s",
+              }}>{showSched ? "Hide" : "View"}</button>
             </div>
 
-            {showSchedule && (
+            {showSched && (
               <div style={{ overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                   <thead>
-                    <tr style={{ background: dark ? "#1a1a1a" : "#f5f4f0" }}>
-                      {["#", "Period", "Description", "Due Date", "Amount (₹)"].map(h => (
-                        <th key={h} style={{ padding: "10px 14px", textAlign: h === "Amount (₹)" ? "right" : "left", fontSize: 10, fontWeight: 700, letterSpacing: "1px", color: T.textSec, whiteSpace: "nowrap" }}>{h}</th>
+                    <tr style={{ background: T.surface2 }}>
+                      {["#", "Period", "Description", "Due Date", "Amount"].map(h => (
+                        <th key={h} style={{ padding: "10px 14px", textAlign: h === "Amount" ? "right" : "left", fontSize: 10, fontWeight: 700, letterSpacing: "1px", color: T.textMute, whiteSpace: "nowrap", borderBottom: `1px solid ${T.border}` }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {schedule.map((row, i) => (
-                      <tr key={i} className="sched-row" style={{ borderBottom: `1px solid ${T.border}` }}>
-                        <td style={{ padding: "10px 14px", color: T.textSec, fontSize: 11 }}>{i + 1}</td>
-                        <td style={{ padding: "10px 14px", color: T.textSec, fontSize: 11 }}>{row.period === "—" ? "—" : row.period}</td>
+                      <tr key={i} className="sched-tr" style={{ borderBottom: `1px solid ${T.border}` }}>
+                        <td style={{ padding: "10px 14px", color: T.textMute, fontSize: 11 }}>{i+1}</td>
+                        <td style={{ padding: "10px 14px", color: T.textSec, fontSize: 11 }}>{row.period}</td>
                         <td style={{ padding: "10px 14px" }}>
-                          <span style={{ color: row.period === "—" ? T.green : T.text, fontWeight: row.period === "—" ? 600 : 400 }}>{row.type}</span>
-                          {row.period === "—" && <span className="chip" style={{ background: T.greenSoft, color: T.green, marginLeft: 8 }}>REFUNDABLE</span>}
+                          <span style={{ color: row.period === "—" ? (dark ? T.green : "#166534") : T.text, fontWeight: row.period === "—" ? 600 : 400 }}>{row.type}</span>
+                          {row.period === "—" && <span style={{ marginLeft: 8, fontSize: 9, fontWeight: 700, color: dark ? T.green : "#166534", background: dark ? "rgba(74,222,128,.1)" : "#DCFCE7", padding: "1px 7px", borderRadius: 20 }}>REFUNDABLE</span>}
                         </td>
                         <td style={{ padding: "10px 14px", color: T.text, whiteSpace: "nowrap" }}>{row.dueDate}</td>
-                        <td style={{ padding: "10px 14px", textAlign: "right", fontWeight: 600, color: T.text, whiteSpace: "nowrap" }}>{fmtD(row.amount)}</td>
+                        <td style={{ padding: "10px 14px", textAlign: "right", fontWeight: 600, color: T.text, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtD(row.amount)}</td>
                       </tr>
                     ))}
-                    {/* Total row */}
-                    <tr style={{ background: dark ? "rgba(232,176,0,.08)" : "rgba(232,176,0,.06)", borderTop: `2px solid ${T.accent}44` }}>
+                    <tr style={{ background: dark ? "rgba(30,64,175,.12)" : "#EEF2FF", borderTop: `2px solid ${dark ? "rgba(99,102,241,.3)" : "#C7D2FE"}` }}>
                       <td colSpan={3} />
-                      <td style={{ padding: "12px 14px", fontSize: 11, fontWeight: 700, color: T.accent, letterSpacing: "1px" }}>TOTAL PAYABLE</td>
-                      <td style={{ padding: "12px 14px", textAlign: "right", fontSize: 14, fontWeight: 800, color: T.accent }}>{fmt(totalPayable)}</td>
+                      <td style={{ padding: "12px 14px", fontSize: 11, fontWeight: 700, color: dark ? "#A5B4FC" : T.accent, letterSpacing: "1px" }}>TOTAL PAYABLE</td>
+                      <td style={{ padding: "12px 14px", textAlign: "right", fontSize: 15, fontWeight: 800, color: dark ? "#A5B4FC" : T.accent, fontVariantNumeric: "tabular-nums" }}>{fmt(totalPayable)}</td>
                     </tr>
                   </tbody>
                 </table>
@@ -730,22 +814,20 @@ export default function RentalPricer() {
           </div>
         )}
 
-        {/* ── DOWNLOAD PDF ── */}
+        {/* ── PDF DOWNLOAD ── */}
         {schedule.length > 0 && (
-          <button className="dlbtn" onClick={handleDownloadPDF} style={{
-            background: dark ? "#1e1e1e" : "#fff",
-            border: `2px solid ${T.accent}`,
-            color: T.accent, marginBottom: 8,
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-          }}>
-            {pdfLoading ? "⏳ Generating PDF..." : "⬇️  Download Payment Schedule PDF"}
-          </button>
-        )}
-
-        {schedule.length > 0 && (
-          <div style={{ fontSize: 11, color: T.textSec, textAlign: "center" }}>
-            Residual value is excluded from the PDF · For internal use only
-          </div>
+          <>
+            <button className="btn-outline" onClick={handlePDF} style={{
+              background: T.surface, border: `1.5px solid ${T.border}`, color: T.text,
+              marginBottom: 8, boxShadow: "0 1px 4px rgba(0,0,0,.06)",
+            }}>
+              <span style={{ fontSize: 16 }}>↓</span>
+              {pdfLoading ? "Generating PDF…" : "Download Payment Schedule PDF"}
+            </button>
+            <div style={{ fontSize: 11, color: T.textMute, textAlign: "center" }}>
+              Residual value excluded from PDF · Client-ready document
+            </div>
+          </>
         )}
 
       </div>
