@@ -1,6 +1,7 @@
 {
   "name": "lease-pricer",
   "version": "1.0.0",
+  "type": "module",
   "scripts": {
     "build": "vite build",
     "dev": "vite"
@@ -11,6 +12,6 @@
   },
   "devDependencies": {
     "vite": "^5.0.0",
-    "@vitejs/plugin-react": "^4.0.0"
+    "@vitejs/plugin-react": "^4.2.0"
   }
 }
