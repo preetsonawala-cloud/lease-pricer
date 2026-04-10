@@ -128,130 +128,234 @@ async function downloadPDF({ schedule, result, clientName, startDate, term, pLab
   await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js");
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-  const W = 210, M = 16;
+  const W = 210, M = 14;
 
-  const navy  = [15,  35,  75];
-  const slate = [71,  85, 105];
-  const gold  = [180,140,  40];
-  const light = [248,249,250];
-  const white = [255,255,255];
-  const green = [22, 160,  90];
+  // ── Palette
+  const NAVY   = [12, 28, 64];
+  const NAVY2  = [30, 55, 110];
+  const SLATE  = [80, 100, 130];
+  const LGRAY  = [235, 238, 244];
+  const WHITE  = [255, 255, 255];
+  const MUTED  = [150, 165, 185];
+  const GREEN  = [16, 140, 72];
+  const GOLD   = [160, 120, 20];
 
-  // Header
-  doc.setFillColor(...navy);
-  doc.rect(0, 0, W, 44, "F");
-  doc.setFillColor(...gold);
-  doc.rect(0, 40, W, 4, "F");
+  const dateStr = new Date().toLocaleDateString("en-IN", { day:"2-digit", month:"long", year:"numeric" });
+  const startStr = startDate ? new Date(startDate).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" }) : "—";
+  const termLabel = TERMS.find(t => t.value === term)?.label || term;
+  const totalPayable = schedule.reduce((s, r) => s + r.amount, 0);
 
+  // ─────────────────────────────────────
+  // PAGE HEADER  (compact — 28mm tall)
+  // ─────────────────────────────────────
+  doc.setFillColor(...NAVY);
+  doc.rect(0, 0, W, 28, "F");
+  // gold accent stripe
+  doc.setFillColor(...GOLD);
+  doc.rect(0, 25, W, 2.5, "F");
+
+  // Brand left
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(20);
-  doc.setTextColor(...white);
-  doc.text("LeasePricer", M, 18);
+  doc.setFontSize(15);
+  doc.setTextColor(...WHITE);
+  doc.text("LeasePricer", M, 12);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  doc.setTextColor(180, 195, 220);
-  doc.text("Equipment Rental Payment Schedule", M, 27);
-  doc.text(`Date: ${new Date().toLocaleDateString("en-IN", { day:"2-digit", month:"long", year:"numeric" })}`, M, 34);
+  doc.setFontSize(7.5);
+  doc.setTextColor(...MUTED);
+  doc.text("Equipment Rental — Payment Schedule", M, 19);
 
+  // Date right
+  doc.setFontSize(7.5);
+  doc.setTextColor(...MUTED);
+  doc.text(dateStr, W - M, 19, { align: "right" });
+
+  // Client name right (large)
   if (clientName) {
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.setTextColor(...white);
-    doc.text(clientName, W - M, 22, { align: "right" });
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
-    doc.setTextColor(180, 195, 220);
-    doc.text("Prepared for", W - M, 16, { align: "right" });
+    doc.setFontSize(11);
+    doc.setTextColor(...WHITE);
+    doc.text(clientName, W - M, 12, { align: "right" });
   }
 
-  let y = 54;
+  // ─────────────────────────────────────
+  // DEAL SUMMARY  (2-column key-value, compact)
+  // ─────────────────────────────────────
+  let y = 34;
 
-  // Summary grid
-  doc.setFillColor(...light);
-  doc.roundedRect(M, y, W - M * 2, 42, 3, 3, "F");
-  doc.setDrawColor(220, 225, 235);
-  doc.setLineWidth(0.3);
-  doc.roundedRect(M, y, W - M * 2, 42, 3, 3, "S");
+  // Build summary items in 2 columns × N rows
+  const summaryLeft = [
+    ["Client",         clientName || "—"],
+    ["Asset Cost",     fmt(result.cost)],
+    ["Lease Duration", `${result.totalPeriods} ${result.ppy === 12 ? "months" : "quarters"}`],
+    ["Payment Terms",  termLabel],
+  ];
+  const summaryRight = [
+    ["Rent Start Date", startStr],
+    ["Regular Rental",  fmtD(result.rental)],
+    result.firstRental > 0
+      ? [`First ${pLabel.charAt(0).toUpperCase()+pLabel.slice(1)} Rental`, fmtD(result.firstRental)]
+      : ["Total Periods", String(result.totalPeriods)],
+    result.deposit > 0
+      ? ["Security Deposit", `${fmt(result.deposit)} (refundable)`]
+      : ["Total Payable", fmt(totalPayable)],
+  ];
 
-  const summaryItems = [
-    ["Asset Cost",      fmt(result.cost)],
-    ["Lease Term",      `${result.totalPeriods} ${result.ppy === 12 ? "months" : "quarters"}`],
-    ["Payment Terms",   TERMS.find(t => t.value === term)?.label || term],
-    ["Rental / Period", fmtD(result.rental)],
-    result.firstRental > 0 ? [`First ${pLabel} Rental`, fmtD(result.firstRental)] : null,
-    result.deposit > 0 ? ["Security Deposit", `${fmt(result.deposit)} (refundable)`] : null,
-    ["Rent Start",      startDate ? new Date(startDate).toLocaleDateString("en-IN", { day:"2-digit", month:"short", year:"numeric" }) : "—"],
-  ].filter(Boolean);
+  const rows = Math.max(summaryLeft.length, summaryRight.length);
+  const boxH = rows * 8 + 8;
+  const colW = (W - M * 2) / 2 - 4;
 
-  const half = Math.ceil(summaryItems.length / 2);
-  summaryItems.forEach(([label, value], i) => {
-    const col = i < half ? 0 : 1;
-    const row = i < half ? i : i - half;
-    const cx = M + 8 + col * ((W - M * 2) / 2);
-    const cy = y + 10 + row * 10;
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7.5);
-    doc.setTextColor(...slate);
-    doc.text(label, cx, cy);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
-    doc.setTextColor(...navy);
-    doc.text(value, cx + 32, cy);
-  });
+  doc.setFillColor(...LGRAY);
+  doc.roundedRect(M, y, W - M * 2, boxH, 2, 2, "F");
 
-  y += 52;
+  for (let i = 0; i < rows; i++) {
+    const cy = y + 7 + i * 8;
 
+    if (summaryLeft[i]) {
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(...SLATE);
+      doc.text(summaryLeft[i][0], M + 5, cy);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.setTextColor(...NAVY);
+      doc.text(summaryLeft[i][1], M + 5 + 36, cy);
+    }
+
+    if (summaryRight[i]) {
+      const rx = M + colW + 12;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(...SLATE);
+      doc.text(summaryRight[i][0], rx, cy);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.setTextColor(...NAVY);
+      doc.text(summaryRight[i][1], rx + 36, cy);
+    }
+  }
+
+  y += boxH + 7;
+
+  // ─────────────────────────────────────
+  // SECTION TITLE
+  // ─────────────────────────────────────
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(10);
-  doc.setTextColor(...navy);
+  doc.setFontSize(8.5);
+  doc.setTextColor(...NAVY);
   doc.text("Payment Schedule", M, y);
-  y += 6;
+  // thin rule
+  doc.setDrawColor(...LGRAY);
+  doc.setLineWidth(0.4);
+  doc.line(M + 38, y - 1, W - M, y - 1);
+  y += 4;
 
-  const tableRows = schedule.map((row, idx) => [
-    idx + 1,
-    row.period === "—" ? "Deposit" : String(row.period),
-    row.type,
-    row.dueDate,
-    fmtD(row.amount),
-  ]);
-
-  const totalPayable = schedule.reduce((s, r) => s + r.amount, 0);
+  // ─────────────────────────────────────
+  // SCHEDULE TABLE  — tight rows, no Period column (redundant with #)
+  // ─────────────────────────────────────
+  const tableBody = schedule.map((row, idx) => {
+    const isDeposit = row.period === "—";
+    return [
+      { content: String(idx + 1), styles: { halign: "center", textColor: SLATE } },
+      { content: isDeposit ? "—" : String(row.period), styles: { halign: "center" } },
+      { content: row.type, styles: isDeposit ? { textColor: GREEN, fontStyle: "bold" } : {} },
+      { content: row.dueDate },
+      { content: fmtD(row.amount), styles: { halign: "right", fontStyle: "bold" } },
+    ];
+  });
 
   doc.autoTable({
     startY: y,
-    head: [["#", "Period", "Description", "Due Date", "Amount (₹)"]],
-    body: tableRows,
-    foot: [["", "", "", "Total Payable", fmtD(totalPayable)]],
+    head: [[
+      { content: "#",          styles: { halign: "center" } },
+      { content: "No.",        styles: { halign: "center" } },
+      { content: "Description" },
+      { content: "Due Date" },
+      { content: "Amount (INR)", styles: { halign: "right" } },
+    ]],
+    body: tableBody,
+    foot: [[
+      { content: "", colSpan: 3 },
+      { content: "TOTAL PAYABLE", styles: { halign: "right", fontStyle: "bold", fontSize: 8, textColor: NAVY } },
+      { content: fmtD(totalPayable), styles: { halign: "right", fontStyle: "bold", fontSize: 9, textColor: NAVY } },
+    ]],
     margin: { left: M, right: M },
+    tableLineColor: LGRAY,
+    tableLineWidth: 0,
     styles: {
-      font: "helvetica", fontSize: 8.5, cellPadding: { top: 5, bottom: 5, left: 5, right: 5 },
-      textColor: [30, 41, 59], lineColor: [226, 232, 240], lineWidth: 0.25,
+      font: "helvetica",
+      fontSize: 8,
+      cellPadding: { top: 2.8, bottom: 2.8, left: 4, right: 4 },
+      textColor: [30, 45, 70],
+      lineColor: LGRAY,
+      lineWidth: 0.2,
+      overflow: "linebreak",
     },
-    headStyles: { fillColor: navy, textColor: white, fontStyle: "bold", fontSize: 8 },
-    footStyles: { fillColor: [235, 238, 245], textColor: navy, fontStyle: "bold", fontSize: 9 },
-    alternateRowStyles: { fillColor: [250, 251, 253] },
+    headStyles: {
+      fillColor: NAVY,
+      textColor: WHITE,
+      fontStyle: "bold",
+      fontSize: 7.5,
+      cellPadding: { top: 3.5, bottom: 3.5, left: 4, right: 4 },
+    },
+    footStyles: {
+      fillColor: [240, 243, 250],
+      textColor: NAVY,
+      fontStyle: "bold",
+      fontSize: 8,
+      cellPadding: { top: 4, bottom: 4, left: 4, right: 4 },
+    },
+    alternateRowStyles: { fillColor: [249, 250, 252] },
     columnStyles: {
-      0: { halign: "center", cellWidth: 9 },
-      1: { cellWidth: 14 },
-      2: { cellWidth: 60 },
-      3: { cellWidth: 32 },
-      4: { halign: "right", cellWidth: 38, fontStyle: "bold" },
+      0: { cellWidth: 9,  halign: "center" },
+      1: { cellWidth: 12, halign: "center" },
+      2: { cellWidth: "auto" },
+      3: { cellWidth: 30 },
+      4: { cellWidth: 36, halign: "right" },
+    },
+    showFoot: "lastPage",
+    didDrawPage: (data) => {
+      // Repeat compact header on continuation pages
+      if (data.pageNumber > 1) {
+        doc.setFillColor(...NAVY);
+        doc.rect(0, 0, W, 14, "F");
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.setTextColor(...WHITE);
+        doc.text("LeasePricer", M, 9);
+        if (clientName) {
+          doc.setFontSize(8);
+          doc.text(clientName, W - M, 9, { align: "right" });
+        }
+        doc.setFillColor(...GOLD);
+        doc.rect(0, 12, W, 1.5, "F");
+      }
     },
   });
 
-  const finalY = doc.lastAutoTable.finalY + 8;
-  doc.setFillColor(248, 249, 250);
-  doc.roundedRect(M, finalY, W - M * 2, 18, 2, 2, "F");
-  doc.setFont("helvetica", "italic");
-  doc.setFontSize(7);
-  doc.setTextColor(100, 116, 139);
-  doc.text("All amounts exclusive of applicable taxes. Security deposit is fully refundable at lease end. Equipment remains the", M + 5, finalY + 7);
-  doc.text("property of the lessor throughout the lease term. This document is for payment reference only.", M + 5, finalY + 13);
+  // ─────────────────────────────────────
+  // FOOTER NOTE  (on last page)
+  // ─────────────────────────────────────
+  const lastY = doc.lastAutoTable.finalY + 6;
+  const pageH = 297;
+  const noteH = 14;
 
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(7);
-  doc.setTextColor(180, 180, 180);
-  doc.text("Confidential — For recipient use only", W / 2, 291, { align: "center" });
+  // Only draw footer if it fits on the page, otherwise it auto goes to next
+  if (lastY + noteH < pageH - 8) {
+    doc.setDrawColor(...LGRAY);
+    doc.setLineWidth(0.3);
+    doc.line(M, lastY, W - M, lastY);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(6.5);
+    doc.setTextColor(...SLATE);
+    doc.text(
+      "All amounts are exclusive of applicable taxes unless stated. Security deposit is fully refundable at lease end. Equipment remains the property of the lessor throughout the lease term.",
+      M, lastY + 5,
+      { maxWidth: W - M * 2 }
+    );
+    doc.setTextColor(...MUTED);
+    doc.text("Confidential — For recipient use only", W / 2, lastY + 12, { align: "center" });
+  }
 
   const safe = clientName ? clientName.replace(/\s+/g, "_") : "Client";
   doc.save(`LeasePricer_${safe}.pdf`);
